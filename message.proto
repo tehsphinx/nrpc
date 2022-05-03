@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package nrpc;
+option go_package = "github.com/tehsphinx/nrpc";
+
+message Message {
+  // Subject of the endpoint.
+  string subject = 1;
+  // Type indicates the type of the message.
+  MessageType type = 3;
+  // Data contains the transmitted bytes. This is a protobuf encoded message.
+  bytes data = 2;
+}
+
+enum MessageType {
+  Data = 0;
+  Error = 1;
+}
+
+message Request {
+  // Headers contain the custom metadata of the request.
+  map<string, Header> header = 1;
+
+  // Data contains the transmitted bytes. This is a protobuf encoded message.
+  bytes data = 2;
+
+  // EOS indicates the end of client side stream.
+  bool eos = 3;
+
+  // The subject the server should open the stream for.
+  string req_subject = 4;
+  // The subject the client has opened the stream for.
+  string resp_subject = 5;
+
+  // Timeout is a duration in nanoseconds the request is allowed to take.
+  // Set to 0 for no timeout.
+  int64 timeout = 6;
+}
+
+message Header {
+  repeated string values = 1;
+}
+
+message Response {
+  // Headers contain the custom metadata of the response.
+  map<string, Header> header = 1;
+
+  // Data contains the transmitted bytes. This is a protobuf encoded message.
+  bytes data = 2;
+
+  // EOS indicates the end of client side stream.
+  bool eos = 3;
+
+  // Trailer contain custom trailer of the response.
+  map<string, Header> trailer = 4;
+}

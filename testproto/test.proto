@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package testproto;
+option go_package = "github.com/tehsphinx/nrpc/testproto";
+
+// Test service used in tests.
+service Test {
+  // Unary implements a unary RPC method for testing.
+  rpc Unary (UnaryReq) returns (UnaryResp) {}
+
+  // ServerStream implements a server streaming RPC method for testing.
+  rpc ServerStream (ServerStreamReq) returns (stream ServerStreamResp) {}
+
+  // ClientStream implements a client streaming RPC method for testing.
+  rpc ClientStream (stream ClientStreamReq) returns (ClientStreamResp) {}
+
+  // BiDiStream implements a bidirectional streaming RPC method for testing.
+  rpc BiDiStream (stream BiDiStreamReq) returns (stream BiDiStreamResp) {}
+}
+
+message UnaryReq {
+  // The request message.
+  string msg = 1;
+}
+
+message UnaryResp {
+  // The response message.
+  string msg = 1;
+}
+
+message ServerStreamReq {
+  // The request message.
+  string msg = 1;
+}
+
+message ServerStreamResp {
+  // The response message.
+  string msg = 1;
+}
+
+message ClientStreamReq {
+  // The request message.
+  string msg = 1;
+}
+
+message ClientStreamResp {
+  // The response message.
+  string msg = 1;
+}
+
+message BiDiStreamReq {
+  // The request message.
+  string msg = 1;
+}
+
+message BiDiStreamResp {
+  // The response message.
+  string msg = 1;
+}
