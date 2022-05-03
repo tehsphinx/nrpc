@@ -31,11 +31,12 @@ type serverStream struct {
 	log  Logger
 	desc grpc.StreamDesc
 
-	ctx        context.Context
-	cancel     context.CancelFunc
-	respSubj   string
-	chRecv     chan *recvMsg
-	sendHeader metadata.MD
+	ctx         context.Context
+	cancel      context.CancelFunc
+	respSubj    string
+	chRecv      chan *recvMsg
+	sendHeader  metadata.MD
+	sendTrailer metadata.MD
 }
 
 // SetHeader sets the header metadata. It may be called multiple times.
@@ -58,19 +59,23 @@ func (s *serverStream) SetHeader(md metadata.MD) error {
 // SendHeader sends the header metadata.
 // The provided md and headers set by SetHeader() will be sent.
 // It fails if called multiple times.
-// TODO: test
 func (s *serverStream) SendHeader(md metadata.MD) error {
 	if r := s.SetHeader(md); r != nil {
 		return r
 	}
-	return s.sendMsg(nil, false)
+	return s.sendMsg(nil, false, true)
 }
 
 // SetTrailer sets the trailer metadata which will be sent with the RPC status.
 // When called more than once, all the provided metadata will be merged.
 func (s *serverStream) SetTrailer(md metadata.MD) {
-	// TODO implement me
-	panic("implement me")
+	if s.sendTrailer == nil {
+		s.sendTrailer = md
+		return
+	}
+	for k, vals := range md {
+		s.sendTrailer[k] = append(s.sendTrailer[k], vals...)
+	}
 }
 
 // Context returns the context for this stream.
@@ -97,12 +102,12 @@ func (s *serverStream) Context() context.Context {
 // to call SendMsg on the same stream in different goroutines.
 func (s *serverStream) SendMsg(m interface{}) error {
 	args := m.(proto.Message)
-	return s.sendMsg(args, false)
+	return s.sendMsg(args, false, false)
 }
 
 // Close closes the stream with OK status.
 func (s *serverStream) Close() {
-	if r := s.sendMsg(nil, true); r != nil {
+	if r := s.sendMsg(nil, true, false); r != nil {
 		s.log.Errorf("failed to close stream: %w", r)
 		return
 	}
@@ -111,19 +116,19 @@ func (s *serverStream) Close() {
 // CloseWithError closes the stream with the specified error.
 func (s *serverStream) CloseWithError(err error) {
 	stats := status.Convert(err)
-	if r := s.sendMsg(stats.Proto(), true); r != nil {
+	if r := s.sendMsg(stats.Proto(), true, false); r != nil {
 		s.log.Errorf("failed to close stream with error: %w", r)
 		return
 	}
 }
 
-func (s *serverStream) sendMsg(args proto.Message, eos bool) (err error) {
+func (s *serverStream) sendMsg(args proto.Message, eos, headerOnly bool) (err error) {
 	defer func() {
 		if err != nil || eos {
 			s.cancel()
 		}
 	}()
-	payload, err := marshalRespMsg(args, s.sendHeader, eos)
+	payload, err := marshalRespMsg(args, s.sendHeader, s.sendTrailer, eos, headerOnly)
 	if err != nil {
 		return err
 	}

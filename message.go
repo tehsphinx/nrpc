@@ -102,16 +102,18 @@ func marshalReqMsg(ctx context.Context, args proto.Message, reqSubj, respSubj st
 	})
 }
 
-func marshalRespMsg(resp proto.Message, header metadata.MD, eos bool) ([]byte, error) {
+func marshalRespMsg(resp proto.Message, header metadata.MD, trailer metadata.MD, eos bool, headerOnly bool) ([]byte, error) {
 	innerPayload, err := proto.Marshal(resp)
 	if err != nil {
 		return nil, err
 	}
 
 	return proto.Marshal(&Response{
-		Header: fromMD(header),
-		Data:   innerPayload,
-		Eos:    eos,
+		Header:     fromMD(header),
+		Trailer:    fromMD(trailer),
+		HeaderOnly: headerOnly,
+		Data:       innerPayload,
+		Eos:        eos,
 	})
 }
 

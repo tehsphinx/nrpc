@@ -33,7 +33,7 @@ func (s serverTransport) SendHeader(md metadata.MD) error {
 }
 
 // SetTrailer implements grpc.ServerTransportStream interface.
-func (s serverTransport) SetTrailer(md metadata.MD) error {
+func (s *serverTransport) SetTrailer(md metadata.MD) error {
 	s.trailer = md
 	return nil
 }

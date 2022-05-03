@@ -2,6 +2,7 @@ package nrpc
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/tehsphinx/nrpc/pubsub"
@@ -75,4 +76,8 @@ func applyRespToOptions(opts []grpc.CallOption, resp *Response) {
 			*o.TrailerAddr = md
 		}
 	}
+}
+
+func methodSubj(method string) string {
+	return "nrpc" + strings.ReplaceAll(method, "/", ".")
 }

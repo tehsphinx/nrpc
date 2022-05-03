@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,8 +55,7 @@ func TestUnary(t *testing.T) {
 		asrt.Equal(header.Get("heady"), []string{"head1"})
 		asrt.Equal(header.Get("srv-key"), []string{"srv-value"})
 
-		// TODO: test trailer
-		// asrt.Equal(trailer.Get("traily"), []string{"t-value"})
+		asrt.Equal(trailer.Get("traily"), []string{"t-value"})
 	})
 }
 
@@ -76,7 +76,7 @@ func TestServerStream(t *testing.T) {
 	client := testclient.New(pub, sub, nrpc.WithLogger(logger))
 	_ = server
 
-	t.Run("call", func(t *testing.T) {
+	t.Run("get stream", func(t *testing.T) {
 		asrt := asrt.New(t)
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
@@ -107,9 +107,8 @@ func TestServerStream(t *testing.T) {
 		asrt.Equal(md.Get("heady"), []string{"head1"})
 		asrt.Equal(md.Get("srv-key"), []string{"srv-value"})
 
-		// TODO: test trailer
-		// md = stream.Trailer()
-		// asrt.Equal(md.Get("traily"), []string{"t-value"})
+		md = stream.Trailer()
+		asrt.Equal(md.Get("traily"), []string{"t-value"})
 	})
 }
 
@@ -130,7 +129,7 @@ func TestClientStream(t *testing.T) {
 	client := testclient.New(pub, sub, nrpc.WithLogger(logger))
 	_ = server
 
-	t.Run("call", func(t *testing.T) {
+	t.Run("send stream", func(t *testing.T) {
 		asrt := asrt.New(t)
 		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
@@ -158,8 +157,74 @@ func TestClientStream(t *testing.T) {
 		asrt.Equal(md.Get("heady"), []string{"head1"})
 		asrt.Equal(md.Get("srv-key"), []string{"srv-value"})
 
-		// TODO: test trailer
-		// md = stream.Trailer()
-		// asrt.Equal(md.Get("traily"), []string{"t-value"})
+		md = stream.Trailer()
+		asrt.Equal(md.Get("traily"), []string{"t-value"})
+	})
+}
+
+func TestBiDiStream(t *testing.T) {
+	asrt := is.New(t)
+	ctx := context.Background()
+	logger := nrpc.StandardLogger{}
+
+	conn, shutdown, err := testproto.NewTestConn()
+	asrt.NoErr(err)
+	defer shutdown()
+
+	pub := nats.Publisher(conn)
+	sub := nats.Subscriber(conn)
+
+	server, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
+	asrt.NoErr(err)
+	client := testclient.New(pub, sub, nrpc.WithLogger(logger))
+	_ = server
+
+	t.Run("open stream", func(t *testing.T) {
+		asrt := asrt.New(t)
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+
+		// outbound header
+		md := metadata.New(map[string]string{"heady": "head1"})
+		ctx = metadata.NewOutgoingContext(ctx, md)
+
+		stream, err := client.BiDiStream(ctx)
+		asrt.NoErr(err)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func(wg *sync.WaitGroup) {
+			defer wg.Done()
+			var i int
+			for {
+				resp, err := stream.Recv()
+				if err == io.EOF {
+					break
+				}
+				asrt.NoErr(err)
+				i++
+				asrt.Equal(resp.Msg, fmt.Sprintf("Hello back! %d", i))
+			}
+		}(&wg)
+
+		for i := 0; i < 5; i++ {
+			err := stream.Send(&testproto.BiDiStreamReq{
+				Msg: fmt.Sprintf("Hello via NRPC %d", i+1),
+			})
+			asrt.NoErr(err)
+		}
+
+		err = stream.CloseSend()
+		asrt.NoErr(err)
+
+		wg.Wait()
+
+		md, err = stream.Header()
+		asrt.NoErr(err)
+		asrt.Equal(md.Get("heady"), []string{"head1"})
+		asrt.Equal(md.Get("srv-key"), []string{"srv-value"})
+
+		md = stream.Trailer()
+		asrt.Equal(md.Get("traily"), []string{"t-value"})
 	})
 }

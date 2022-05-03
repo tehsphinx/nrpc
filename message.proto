@@ -45,6 +45,9 @@ message Response {
   // Headers contain the custom metadata of the response.
   map<string, Header> header = 1;
 
+  // HeaderOnly reports whether the response is a SendHeader and doesn't contain data.
+  bool header_only = 5;
+
   // Data contains the transmitted bytes. This is a protobuf encoded message.
   bytes data = 2;
 

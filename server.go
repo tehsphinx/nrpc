@@ -88,7 +88,7 @@ func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) func(conte
 			return
 		}
 
-		payload, err := marshalRespMsg(resp.(proto.Message), transport.header, true)
+		payload, err := marshalRespMsg(resp.(proto.Message), transport.header, transport.trailer, true, false)
 		if err != nil {
 			s.respondErr(msg, err)
 			return

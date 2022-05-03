@@ -35,10 +35,6 @@ func newClientStream(ctx context.Context, pub pubsub.Publisher, sub pubsub.Subsc
 	return s
 }
 
-func methodSubj(method string) string {
-	return "nrpc" + strings.ReplaceAll(method, "/", ".")
-}
-
 type clientStream struct {
 	pub pubsub.Publisher
 	sub pubsub.Subscriber
@@ -52,36 +48,24 @@ type clientStream struct {
 	respSubj   string
 	opts       []grpc.CallOption
 
-	firstSent  bool
-	sendClosed bool
-	chRecv     chan *respMsg
-	lastRecv   *respMsg
-	recvHeader metadata.MD
+	firstSent   bool
+	sendClosed  bool
+	chRecv      chan *respMsg
+	recvHeader  metadata.MD
+	recvTrailer metadata.MD
 }
 
 // Header returns the header metadata received from the server if there
 // is any. It blocks if the metadata is not ready to read.
 func (s *clientStream) Header() (metadata.MD, error) {
-	if s.recvHeader != nil {
-		return s.recvHeader, nil
-	}
-	if s.lastRecv == nil {
-		return nil, nil
-	}
-	resp, err := s.lastRecv.response()
-	if err != nil {
-		return nil, err
-	}
-
-	return toMD(resp.Header), nil
+	return s.recvHeader, nil
 }
 
 // Trailer returns the trailer metadata from the server, if there is any.
 // It must only be called after stream.CloseAndRecv has returned, or
 // stream.Recv has returned a non-nil error (including io.EOF).
 func (s *clientStream) Trailer() metadata.MD {
-	// TODO implement me
-	panic("implement me")
+	return s.recvTrailer
 }
 
 // CloseSend closes the send direction of the stream. It closes the stream
@@ -188,33 +172,44 @@ func (s *clientStream) sendMsg(subj string, payload []byte) error {
 // calling RecvMsg on the same stream at the same time, but it is not
 // safe to call RecvMsg on the same stream in different goroutines.
 func (s *clientStream) RecvMsg(target interface{}) error {
+	for {
+		resp, err := s.recvMsg(target)
+		if err != nil {
+			return err
+		}
+		if resp.HeaderOnly {
+			continue
+		}
+		return nil
+	}
+}
+
+func (s *clientStream) recvMsg(target interface{}) (*Response, error) {
 	var recv *respMsg
 	select {
 	case <-s.ctx.Done():
-		return s.ctx.Err()
+		return nil, s.ctx.Err()
 	case recv = <-s.chRecv:
 	}
 
 	resp, err := unmarshalRespMsg(recv.data, target)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.Eos {
 		s.cancel()
 		if resp.Data != nil {
-			return unmarshalErr(resp.Data)
+			return nil, unmarshalErr(resp.Data)
 		}
-		return io.EOF
+		return nil, io.EOF
 	}
 	if resp.Header != nil {
 		s.recvHeader = toMD(resp.Header)
 	}
-
-	s.lastRecv = &respMsg{
-		ctx:  recv.ctx,
-		resp: resp,
+	if resp.Trailer != nil {
+		s.recvTrailer = toMD(resp.Trailer)
 	}
-	return nil
+	return resp, nil
 }
 
 // Subscribe subscribes to the server stream.
