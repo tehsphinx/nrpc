@@ -1,7 +1,5 @@
 package nrpc
 
-import "google.golang.org/grpc"
-
 // Option defines an option for configuring the server.
 type Option func(opt *options)
 
@@ -25,13 +23,4 @@ func WithLogger(log Logger) Option {
 	return func(opt *options) {
 		opt.logger = log
 	}
-}
-
-type callOptions struct {
-}
-
-func getCallOptions(opts []grpc.CallOption) callOptions {
-	opt := callOptions{}
-
-	return opt
 }

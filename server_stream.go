@@ -101,6 +101,7 @@ func (s *serverStream) Context() context.Context {
 // calling RecvMsg on the same stream at the same time, but it is not safe
 // to call SendMsg on the same stream in different goroutines.
 func (s *serverStream) SendMsg(m interface{}) error {
+	// nolint: forcetypeassert
 	args := m.(proto.Message)
 	return s.sendMsg(args, false, false)
 }
@@ -183,6 +184,7 @@ func (s *serverStream) recvMsg(target interface{}) (*Request, error) {
 		return nil, err
 	}
 
+	// nolint: forcetypeassert
 	if r := proto.Unmarshal(req.Data, target.(proto.Message)); r != nil {
 		return nil, r
 	}
@@ -203,7 +205,6 @@ func (s *serverStream) Subscribe(ctx context.Context, reqData []byte) error {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
 	s.log.Infof("Subscribed Stream (server): Subject => %s, Queue => %s", req.ReqSubject, queue)
-	var dropped int
 	sub, err := s.sub.Subscribe(req.ReqSubject, queue, func(ctx context.Context, msg pubsub.Replier) {
 		// dbg.Cyan("client -> server (received)", msg.Subject(), msg.Data())
 		select {
@@ -215,13 +216,10 @@ func (s *serverStream) Subscribe(ctx context.Context, reqData []byte) error {
 			case <-ctx.Done():
 				s.cancel()
 			case s.chRecv <- &recvMsg{ctx: ctx, data: msg.Data()}:
-			case <-time.After(30 * time.Second):
-				dropped++
-				s.log.Errorf("Stream (server): Subject => %s, Queue => %s: dropped message: "+
-					"client stream consumer stuck for 30sec", s.respSubj, queue)
-				if dropped > 4 {
-					s.cancel()
-				}
+			case <-time.After(stuckTimeout):
+				s.log.Errorf("Stream: Subject => %s, Queue => %s: closing stream: "+
+					"server stream consumer stuck for 30sec", s.respSubj, queue)
+				s.cancel()
 			}
 		}
 	})

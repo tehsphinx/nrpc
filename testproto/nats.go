@@ -1,3 +1,6 @@
+// Package testproto contains the generated testproto grpc code.
+// Additionally it contains a function to start the server and
+// returns a NATS connection to it. NATS is used in the tests.
 package testproto
 
 import (
@@ -10,6 +13,7 @@ import (
 
 // NewTestConn creates a nats test connection and returns a shutdown function to be deferred.
 func NewTestConn() (conn *nats.Conn, shutdown func(), err error) {
+	// nolint: gomnd
 	port, err := getFreePort(3)
 	if err != nil {
 		return nil, nil, fmt.Errorf("no free port found")
@@ -44,7 +48,7 @@ func NewTestConn() (conn *nats.Conn, shutdown func(), err error) {
 func getFreePort(n int) (port int, err error) {
 	for i := 0; i < n; i++ {
 		if port, err = getPort(); err == nil {
-			return port, err
+			return port, nil
 		}
 	}
 	return 0, err
@@ -55,6 +59,7 @@ func getPort() (port int, err error) {
 	if err != nil {
 		return 0, err
 	}
+	// nolint: forcetypeassert
 	port = ln.Addr().(*net.TCPAddr).Port
 	err = ln.Close()
 	return port, err

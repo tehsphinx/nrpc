@@ -2,6 +2,7 @@ package nrpc_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -20,7 +21,7 @@ import (
 
 func TestUnary(t *testing.T) {
 	asrt := is.New(t)
-	ctx := context.Background()
+	ctxMain := context.Background()
 	logger := nrpc.StandardLogger{}
 
 	conn, shutdown, err := testproto.NewTestConn()
@@ -37,7 +38,7 @@ func TestUnary(t *testing.T) {
 
 	t.Run("call", func(t *testing.T) {
 		asrt := asrt.New(t)
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctxMain, 2*time.Second)
 		defer cancel()
 
 		// outbound header
@@ -61,7 +62,7 @@ func TestUnary(t *testing.T) {
 
 func TestServerStream(t *testing.T) {
 	asrt := is.New(t)
-	ctx := context.Background()
+	ctxMain := context.Background()
 	logger := nrpc.StandardLogger{}
 
 	conn, shutdown, err := testproto.NewTestConn()
@@ -78,7 +79,7 @@ func TestServerStream(t *testing.T) {
 
 	t.Run("get stream", func(t *testing.T) {
 		asrt := asrt.New(t)
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctxMain, 2*time.Second)
 		defer cancel()
 
 		// outbound header
@@ -92,11 +93,11 @@ func TestServerStream(t *testing.T) {
 
 		var i int
 		for {
-			msg, err := stream.Recv()
-			if err != nil && err == io.EOF {
+			msg, r := stream.Recv()
+			if r != nil && errors.Is(r, io.EOF) {
 				break
 			}
-			asrt.NoErr(err)
+			asrt.NoErr(r)
 
 			i++
 			asrt.Equal(msg.Msg, fmt.Sprintf("Hello back! %d", i))
@@ -114,7 +115,7 @@ func TestServerStream(t *testing.T) {
 
 func TestClientStream(t *testing.T) {
 	asrt := is.New(t)
-	ctx := context.Background()
+	ctxMain := context.Background()
 	logger := nrpc.StandardLogger{}
 
 	conn, shutdown, err := testproto.NewTestConn()
@@ -131,7 +132,7 @@ func TestClientStream(t *testing.T) {
 
 	t.Run("send stream", func(t *testing.T) {
 		asrt := asrt.New(t)
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctxMain, 2*time.Second)
 		defer cancel()
 
 		// outbound header
@@ -142,10 +143,10 @@ func TestClientStream(t *testing.T) {
 		asrt.NoErr(err)
 
 		for i := 0; i < 5; i++ {
-			err := stream.Send(&testproto.ClientStreamReq{
+			r := stream.Send(&testproto.ClientStreamReq{
 				Msg: fmt.Sprintf("Hello via NRPC %d", i+1),
 			})
-			asrt.NoErr(err)
+			asrt.NoErr(r)
 		}
 
 		resp, err := stream.CloseAndRecv()
@@ -164,7 +165,7 @@ func TestClientStream(t *testing.T) {
 
 func TestBiDiStream(t *testing.T) {
 	asrt := is.New(t)
-	ctx := context.Background()
+	ctxMain := context.Background()
 	logger := nrpc.StandardLogger{}
 
 	conn, shutdown, err := testproto.NewTestConn()
@@ -181,7 +182,7 @@ func TestBiDiStream(t *testing.T) {
 
 	t.Run("open stream", func(t *testing.T) {
 		asrt := asrt.New(t)
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ctx, cancel := context.WithTimeout(ctxMain, 2*time.Second)
 		defer cancel()
 
 		// outbound header
@@ -197,21 +198,21 @@ func TestBiDiStream(t *testing.T) {
 			defer wg.Done()
 			var i int
 			for {
-				resp, err := stream.Recv()
-				if err == io.EOF {
+				resp, r := stream.Recv()
+				if errors.Is(r, io.EOF) {
 					break
 				}
-				asrt.NoErr(err)
+				asrt.NoErr(r)
 				i++
 				asrt.Equal(resp.Msg, fmt.Sprintf("Hello back! %d", i))
 			}
 		}(&wg)
 
 		for i := 0; i < 5; i++ {
-			err := stream.Send(&testproto.BiDiStreamReq{
+			r := stream.Send(&testproto.BiDiStreamReq{
 				Msg: fmt.Sprintf("Hello via NRPC %d", i+1),
 			})
-			asrt.NoErr(err)
+			asrt.NoErr(r)
 		}
 
 		err = stream.CloseSend()

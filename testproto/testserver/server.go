@@ -1,7 +1,9 @@
+// Package testserver implements the testproto service used in tests.
 package testserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -99,10 +101,10 @@ func (s Server) ClientStream(stream testproto.Test_ClientStreamServer) error {
 	var i int
 	for {
 		req, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			return err
 		}
 
@@ -139,10 +141,10 @@ func (s Server) BiDiStream(stream testproto.Test_BiDiStreamServer) error {
 	var i int
 	for {
 		req, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			return err
 		}
 

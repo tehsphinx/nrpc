@@ -58,8 +58,8 @@ func timeoutFromCtx(ctx context.Context) int64 {
 
 // NewStream begins a streaming RPC.
 func (s *Client) NewStream(ctx context.Context, _ *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-	stream := newClientStream(ctx, s.pub, s.sub, s.log, method, opts)
-	if r := stream.Subscribe(); r != nil {
+	stream := newClientStream(s.pub, s.sub, s.log, method, opts)
+	if r := stream.Subscribe(ctx); r != nil {
 		return nil, r
 	}
 	return stream, nil

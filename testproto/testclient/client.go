@@ -1,3 +1,4 @@
+// Package testclient creates a new client for the testproto service used in tests.
 package testclient
 
 import (

@@ -13,18 +13,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func newClientStream(ctx context.Context, pub pubsub.Publisher, sub pubsub.Subscriber, log Logger,
+func newClientStream(pub pubsub.Publisher, sub pubsub.Subscriber, log Logger,
 	method string, opts []grpc.CallOption) *clientStream {
 
-	ctx, cancel := context.WithCancel(ctx)
-
-	randSuffix := randString(10)
+	randSuffix := randString(randSubjectLen)
 	s := &clientStream{
 		pub:        pub,
 		sub:        sub,
 		log:        log,
-		ctx:        ctx,
-		cancel:     cancel,
 		method:     method,
 		methodSubj: methodSubj(method),
 		reqSubj:    "nrpc.req" + strings.ReplaceAll(method, "/", ".") + "." + randSuffix,
@@ -119,6 +115,7 @@ func (s *clientStream) SendMsg(m interface{}) error {
 		return s.ctx.Err()
 	default:
 	}
+	// nolint: forcetypeassert
 	args := m.(proto.Message)
 
 	subj, reqSubj, respSubj := s.getSubjects()
@@ -145,7 +142,7 @@ func (s *clientStream) sendMsg(subj string, payload []byte) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, streamConnectTimeout)
 	defer cancel()
 
 	resp, err := s.pub.Request(ctx, pubsub.Message{
@@ -213,11 +210,12 @@ func (s *clientStream) recvMsg(target interface{}) (*Response, error) {
 }
 
 // Subscribe subscribes to the server stream.
-func (s *clientStream) Subscribe() error {
+func (s *clientStream) Subscribe(ctx context.Context) error {
 	queue := "receive"
 
+	s.ctx, s.cancel = context.WithCancel(ctx)
+
 	s.log.Infof("Subscribed Stream (client): Subject => %s, Queue => %s", s.respSubj, queue)
-	var dropped int
 	sub, err := s.sub.Subscribe(s.respSubj, queue, func(ctx context.Context, msg pubsub.Replier) {
 		// dbg.Cyan("server -> client (received)", msg.Subject(), msg.Data())
 		select {
@@ -232,13 +230,10 @@ func (s *clientStream) Subscribe() error {
 				s.cancel()
 				return
 			case s.chRecv <- &respMsg{ctx: ctx, data: msg.Data()}:
-			case <-time.After(30 * time.Second):
-				dropped++
-				s.log.Errorf("Stream (client): Subject => %s, Queue => %s: dropped message: "+
+			case <-time.After(stuckTimeout):
+				s.log.Errorf("Stream: Subject => %s, Queue => %s: closing stream: "+
 					"client stream consumer stuck for 30sec", s.respSubj, queue)
-				if dropped > 4 {
-					s.cancel()
-				}
+				s.cancel()
 			}
 		}
 	})

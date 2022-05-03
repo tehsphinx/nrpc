@@ -1,0 +1,93 @@
+linters-settings:
+  depguard:
+    list-type: blacklist
+    include-go-root: false
+    packages:
+      - errors
+      - github.com/pkg/errors
+      - github.com/sirupsen/logrus
+      - github.com/tehsphinx/dbg
+      - flag
+      - github.com/bmizerany/assert
+  dupl:
+    threshold: 150
+  funlen:
+    lines: 70
+    statements: 40
+  gci:
+    no-inline-comments: true
+    no-prefix-comments: true
+    sections:
+      - standard
+      - default
+      - prefix(gitlab.gostudent.cloud)
+  gocyclo:
+    min-complexity: 20
+  govet:
+    check-shadowing: true
+  lll:
+    line-length: 150
+  maligned:
+    suggest-new: true
+  nakedret:
+    max-func-lines: 6
+  revive:
+    min-confidence: 0.8
+    rules:
+    - name: argument-limit
+      severity: warning
+      disabled: false
+      arguments: [5]
+
+linters:
+  enable-all: true
+  disable:
+    - containedctx
+    - cyclop
+    - dupl
+    - exhaustivestruct
+    - gocognit
+    - godot
+    - godox
+    - goerr113
+    - gofumpt
+    - golint
+    - gomoddirectives
+#    - gomnd
+    - interfacer
+    - ireturn
+    - maintidx
+    - maligned
+    - nlreturn
+    - paralleltest
+    - scopelint
+    - testpackage
+    - varnamelen
+    - wrapcheck
+    - whitespace
+    - wsl
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - dupl
+        - errcheck
+        - funlen
+        - gochecknoglobals
+        - gocritic
+        - gocyclo
+        - gosec
+        - prealloc
+        - unparam
+    - text: "Using the variable on range scope `tt` in function literal"
+      linters:
+        - scopelint
+
+  exclude-use-default: false
+  exclude:
+    # errcheck: Almost all programs ignore errors on these functions and in most cases it's ok
+    - Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*printf?|os\.(Un)?Setenv). is not checked
+
+    # govet: shadowing is.I instance in sub test.
+    - declaration of "asrt" shadows declaration

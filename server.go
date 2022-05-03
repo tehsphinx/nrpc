@@ -71,6 +71,7 @@ func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) func(conte
 		defer cancel()
 
 		dec := func(target interface{}) error {
+			// nolint: forcetypeassert
 			return proto.Unmarshal(req.Data, target.(proto.Message))
 		}
 
@@ -98,11 +99,12 @@ func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) func(conte
 	}
 }
 
-func (s *Server) respondErr(msg pubsub.Replier, err error) {
-	errStatus, ok := status.FromError(err)
+func (s *Server) respondErr(msg pubsub.Replier, resErr error) {
+	errStatus, ok := status.FromError(resErr)
 	if !ok {
-		errStatus = status.FromContextError(err)
-		err = errStatus.Err()
+		errStatus = status.FromContextError(resErr)
+		// updates the resErr to the status error. Needed if below TODO is implemented
+		// resErr = errStatus.Err()
 	}
 
 	// TODO: inject external error handler for logging, tracing, etc.
@@ -137,11 +139,11 @@ func (s *Server) handleStream(desc grpc.StreamDesc, impl interface{}) func(conte
 		}
 		go func() {
 			if r := func() (err error) {
-				// defer func() {
-				// 	if r := recover(); r != nil {
-				// 		err = fmt.Errorf("server.handleStream: panic recovered: %v", r)
-				// 	}
-				// }()
+				defer func() {
+					if r := recover(); r != nil {
+						err = fmt.Errorf("server.handleStream: panic recovered: %v", r)
+					}
+				}()
 
 				return desc.Handler(impl, stream)
 			}(); r != nil {
