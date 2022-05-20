@@ -24,8 +24,6 @@ func newServerStream(pub pubsub.Publisher, sub pubsub.Subscriber, log Logger, de
 }
 
 type serverStream struct {
-	orgCtx context.Context
-
 	pub  pubsub.Publisher
 	sub  pubsub.Subscriber
 	log  Logger
@@ -161,9 +159,9 @@ func (s *serverStream) RecvMsg(target interface{}) (err error) {
 	if err != nil {
 		return err
 	}
-	if req.Header != nil {
-		s.ctx = metadata.NewIncomingContext(s.ctx, toMD(req.Header))
-	}
+	// if req.Header != nil {
+	// 	s.ctx = metadata.NewIncomingContext(s.ctx, toMD(req.Header))
+	// }
 	if req.Eos {
 		return io.EOF
 	}
@@ -201,7 +199,6 @@ func (s *serverStream) Subscribe(ctx context.Context, reqData []byte) error {
 	}
 	s.respSubj = req.RespSubject
 	ctx = metadata.NewIncomingContext(ctx, toMD(req.Header))
-	s.orgCtx = ctx
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
 	s.log.Infof("Subscribed Stream (server): Subject => %s, Queue => %s", req.ReqSubject, queue)

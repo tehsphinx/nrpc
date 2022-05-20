@@ -31,7 +31,7 @@ func TestUnary(t *testing.T) {
 	pub := nats.Publisher(conn)
 	sub := nats.Subscriber(conn)
 
-	server, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
+	server, _, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
 	asrt.NoErr(err)
 	client := testclient.New(pub, sub, nrpc.WithLogger(logger))
 	_ = server
@@ -72,7 +72,7 @@ func TestServerStream(t *testing.T) {
 	pub := nats.Publisher(conn)
 	sub := nats.Subscriber(conn)
 
-	server, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
+	server, _, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
 	asrt.NoErr(err)
 	client := testclient.New(pub, sub, nrpc.WithLogger(logger))
 	_ = server
@@ -125,7 +125,7 @@ func TestClientStream(t *testing.T) {
 	pub := nats.Publisher(conn)
 	sub := nats.Subscriber(conn)
 
-	server, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
+	server, _, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
 	asrt.NoErr(err)
 	client := testclient.New(pub, sub, nrpc.WithLogger(logger))
 	_ = server
@@ -175,7 +175,7 @@ func TestBiDiStream(t *testing.T) {
 	pub := nats.Publisher(conn)
 	sub := nats.Subscriber(conn)
 
-	server, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
+	server, _, err := testserver.New(pub, sub, nrpc.WithLogger(logger))
 	asrt.NoErr(err)
 	client := testclient.New(pub, sub, nrpc.WithLogger(logger))
 	_ = server

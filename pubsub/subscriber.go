@@ -10,6 +10,7 @@ type Subscriber interface {
 	Flush() error
 }
 
+// Handler defines a pubsub handler.
 type Handler func(ctx context.Context, msg Replier)
 
 type Replier interface {
@@ -21,4 +22,5 @@ type Replier interface {
 
 type Subscription interface {
 	Unsubscribe() error
+	IsValid() bool
 }

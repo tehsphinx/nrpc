@@ -18,29 +18,36 @@ import (
 )
 
 // New creates a new test server.
-func New(pub pubsub.Publisher, sub pubsub.Subscriber, opts ...nrpc.Option) (*nrpc.Server, error) {
-	impl := &Server{}
+func New(pub pubsub.Publisher, sub pubsub.Subscriber, opts ...nrpc.Option) (*nrpc.Server, *Server, error) {
+	impl := &Server{msgCount: 5}
 
 	rpcServer := nrpc.NewServer(pub, sub, opts...)
 	testproto.RegisterTestServer(rpcServer, impl)
-	if err := rpcServer.RegistrationErr(); err != nil {
-		return nil, err
+	if r := rpcServer.Run(context.Background()); r != nil {
+		return nil, nil, r
 	}
 
-	return rpcServer, nil
+	return rpcServer, impl, nil
 }
 
 // Server is the server implementation of the testproto.TestServiceServer interface.
 type Server struct {
 	testproto.UnimplementedTestServer
+	msgCount int
 }
 
 var _ testproto.TestServer = (*Server)(nil)
 
+// SetMsgCount sets the number of messages to send in the tests.
+func (s *Server) SetMsgCount(count int) {
+	s.msgCount = count
+}
+
 // Unary implements a unary RPC method for testing.
 func (s Server) Unary(ctx context.Context, req *testproto.UnaryReq) (*testproto.UnaryResp, error) {
-	log.Println("Unary called with", req)
-
+	if req.Msg != "Hello via NRPC" {
+		return nil, status.Error(codes.InvalidArgument, "invalid message")
+	}
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		log.Println("failed to get metadata from context")
@@ -63,8 +70,9 @@ func (s Server) Unary(ctx context.Context, req *testproto.UnaryReq) (*testproto.
 
 // ServerStream implements a server streaming RPC method for testing.
 func (s Server) ServerStream(req *testproto.ServerStreamReq, stream testproto.Test_ServerStreamServer) error {
-	log.Println("ServerStream called with", req)
-
+	if req.Msg != "Hello via NRPC" {
+		return status.Error(codes.InvalidArgument, "invalid message")
+	}
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		log.Println("failed to get metadata from context")
@@ -77,7 +85,7 @@ func (s Server) ServerStream(req *testproto.ServerStreamReq, stream testproto.Te
 	}
 	stream.SetTrailer(metadata.Pairs("traily", "t-value"))
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < s.msgCount; i++ {
 		if r := stream.Send(&testproto.ServerStreamResp{
 			Msg: fmt.Sprintf("Hello back! %d", i+1),
 		}); r != nil {

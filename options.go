@@ -18,7 +18,7 @@ type options struct {
 	logger Logger
 }
 
-// WithLogger sets the logger for the server.
+// WithLogger sets the logger for the client or server.
 func WithLogger(log Logger) Option {
 	return func(opt *options) {
 		opt.logger = log

@@ -12,51 +12,90 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const checkSubsInterval = 5 * time.Minute
+
+// Server implements the grpc.ServiceRegistrar interface.
 type Server struct {
 	pub pubsub.Publisher
 	sub pubsub.Subscriber
 	log Logger
 
-	subs   *subscriptions
-	regErr error
+	subs     *subscriptions
+	shutdown context.CancelFunc
 }
 
+var _ grpc.ServiceRegistrar = (*Server)(nil)
+
+// Run starts the server by subscribing to the registered endpoints.
+func (s *Server) Run(ctx context.Context) error {
+	if r := s.subs.subscribe(s.sub); r != nil {
+		return r
+	}
+	if r := s.sub.Flush(); r != nil {
+		return r
+	}
+
+	shutdownCtx, shutdown := context.WithCancel(ctx)
+	s.shutdown = shutdown
+
+	go func() {
+		defer shutdown()
+
+		if err := s.subs.watchSubscriptions(shutdownCtx); err != nil {
+			s.log.Errorf("subscriptions watcher returned with error: %v", err)
+		}
+	}()
+	return nil
+}
+
+// Listen starts the server by subscribing to the registered endpoints
+// and blocks until closed or an error occurs.
+func (s *Server) Listen(ctx context.Context) error {
+	if r := s.subs.subscribe(s.sub); r != nil {
+		return r
+	}
+	if r := s.sub.Flush(); r != nil {
+		return r
+	}
+
+	shutdownCtx, shutdown := context.WithCancel(ctx)
+	s.shutdown = shutdown
+	defer shutdown()
+
+	return s.subs.watchSubscriptions(shutdownCtx)
+}
+
+// Stop signals the Service to shutdown. Stopping is done when the Listen function returns.
+func (s *Server) Stop() {
+	s.shutdown()
+}
+
+// RegisterService implements the grpc.ServiceRegistrar interface.
 func (s *Server) RegisterService(desc *grpc.ServiceDesc, impl interface{}) {
 	prefix := "nrpc." + desc.ServiceName
 
 	for _, mDesc := range desc.Methods {
 		subject := prefix + "." + mDesc.MethodName
 
-		sub, err := s.sub.SubscribeAsync(subject, desc.ServiceName, s.handleMethod(mDesc, impl))
-		if err != nil {
-			s.regErr = err
-			return
-		}
-
-		s.subs.register(subject, sub)
-		s.log.Infof("Subscribed: subject => %v, queue => %v", subject, desc.ServiceName)
+		s.subs.RegisterSubscription(subscription{
+			endpoint: subject,
+			queue:    desc.ServiceName,
+			handler:  s.handleMethod(mDesc, impl),
+		})
 	}
 
 	for _, sDesc := range desc.Streams {
 		subject := prefix + "." + sDesc.StreamName
 
-		sub, err := s.sub.SubscribeAsync(subject, desc.ServiceName, s.handleStream(sDesc, impl))
-		if err != nil {
-			s.regErr = err
-			return
-		}
-
-		s.subs.register(subject, sub)
-		s.log.Infof("Subscribed: subject => %v, queue => %v", subject, desc.ServiceName)
-	}
-
-	if r := s.sub.Flush(); r != nil {
-		s.regErr = r
-		return
+		s.subs.RegisterSubscription(subscription{
+			endpoint: subject,
+			queue:    desc.ServiceName,
+			handler:  s.handleStream(sDesc, impl),
+		})
 	}
 }
 
-func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) func(context.Context, pubsub.Replier) {
+func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) pubsub.Handler {
 	return func(ctx context.Context, msg pubsub.Replier) {
 		req, err := unmarshalReq(msg.Data())
 		if err != nil {
@@ -128,7 +167,7 @@ func (s *Server) reply(msg pubsub.Replier, payload []byte) {
 	}
 }
 
-func (s *Server) handleStream(desc grpc.StreamDesc, impl interface{}) func(context.Context, pubsub.Replier) {
+func (s *Server) handleStream(desc grpc.StreamDesc, impl interface{}) pubsub.Handler {
 	return func(ctx context.Context, msg pubsub.Replier) {
 		// dbg.Green("server.handleStream", msg.Subject(), msg.Data())
 
@@ -161,11 +200,6 @@ func (s *Server) handleStream(desc grpc.StreamDesc, impl interface{}) func(conte
 			return
 		}
 	}
-}
-
-// RegistrationErr returns an error that occurred during registration.
-func (s Server) RegistrationErr() error {
-	return s.regErr
 }
 
 func contextTimeout(ctx context.Context, timeout int64) (context.Context, context.CancelFunc) {

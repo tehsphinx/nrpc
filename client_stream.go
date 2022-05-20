@@ -13,9 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func newClientStream(pub pubsub.Publisher, sub pubsub.Subscriber, log Logger,
-	method string, opts []grpc.CallOption) *clientStream {
-
+func newClientStream(pub pubsub.Publisher, sub pubsub.Subscriber, log Logger, method string, opts []grpc.CallOption) *clientStream {
 	randSuffix := randString(randSubjectLen)
 	s := &clientStream{
 		pub:        pub,

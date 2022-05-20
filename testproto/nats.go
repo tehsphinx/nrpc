@@ -5,6 +5,7 @@ package testproto
 
 import (
 	"fmt"
+	"math"
 	"net"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -20,10 +21,10 @@ func NewTestConn() (conn *nats.Conn, shutdown func(), err error) {
 	}
 
 	opts := server.Options{
-		Host: "localhost",
-		Port: port,
-		// NoLog:  true,
-		// NoSigs: true,
+		Host:       "localhost",
+		Port:       port,
+		MaxPayload: math.MaxInt32,
+		MaxPending: math.MaxInt64,
 	}
 	gnatsd, err := server.NewServer(&opts)
 	if err != nil {
