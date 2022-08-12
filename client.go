@@ -40,8 +40,7 @@ func (s *Client) Invoke(ctx context.Context, method string, args interface{}, re
 	if err != nil {
 		return err
 	}
-
-	resp, err := unmarshalRespMsg(res.Data, reply.(proto.Message))
+	resp, err := unmarshalUnaryRespMsg(res.Data, reply.(proto.Message))
 	if err != nil {
 		return err
 	}

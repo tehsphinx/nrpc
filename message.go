@@ -83,6 +83,21 @@ func marshalRespMsg(resp proto.Message, header metadata.MD, trailer metadata.MD,
 	})
 }
 
+func marshalUnaryRespMsg(subj string, resp proto.Message, header metadata.MD, trailer metadata.MD, eos bool, headerOnly bool) ([]byte, error) {
+	innerPayload, err := proto.Marshal(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return marshalProto(subj, &Response{
+		Header:     fromMD(header),
+		Trailer:    fromMD(trailer),
+		HeaderOnly: headerOnly,
+		Data:       innerPayload,
+		Eos:        eos,
+	}, MessageType_Data)
+}
+
 func marshalEOS() ([]byte, error) {
 	return proto.Marshal(&Request{
 		Eos: true,
@@ -101,6 +116,24 @@ func unmarshalReq(data []byte) (*Request, error) {
 func unmarshalRespMsg(data []byte, target interface{}) (*Response, error) {
 	var resp Response
 	if r := proto.Unmarshal(data, &resp); r != nil {
+		return nil, r
+	}
+
+	// nolint: forcetypeassert
+	return &resp, proto.Unmarshal(resp.GetData(), target.(proto.Message))
+}
+
+func unmarshalUnaryRespMsg(data []byte, target interface{}) (*Response, error) {
+	var msg Message
+	if r := proto.Unmarshal(data, &msg); r != nil {
+		return nil, r
+	}
+	if msg.GetType() == MessageType_Error {
+		return nil, unmarshalErr(msg.GetData())
+	}
+
+	var resp Response
+	if r := proto.Unmarshal(msg.GetData(), &resp); r != nil {
 		return nil, r
 	}
 

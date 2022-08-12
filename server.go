@@ -8,6 +8,7 @@ import (
 	"github.com/tehsphinx/nrpc/pubsub"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
@@ -22,9 +23,14 @@ type Server struct {
 
 	subs     *subscriptions
 	shutdown context.CancelFunc
+
+	unaryInt    grpc.UnaryServerInterceptor
+	streamInt   grpc.StreamServerInterceptor
+	serviceInfo map[string]grpc.ServiceInfo
 }
 
 var _ grpc.ServiceRegistrar = (*Server)(nil)
+var _ reflection.ServiceInfoProvider = (*Server)(nil)
 
 // Run starts the server by subscribing to the registered endpoints.
 func (s *Server) Run(ctx context.Context) error {
@@ -93,6 +99,37 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, impl interface{}) {
 			handler:  s.handleStream(sDesc, impl),
 		})
 	}
+
+	s.registerServiceInfo(desc)
+}
+
+func (s *Server) registerServiceInfo(desc *grpc.ServiceDesc) {
+	methods := make([]grpc.MethodInfo, 0, len(desc.Methods)+len(desc.Streams))
+	for _, mDesc := range desc.Methods {
+		methods = append(methods, grpc.MethodInfo{
+			Name:           mDesc.MethodName,
+			IsClientStream: false,
+			IsServerStream: false,
+		})
+	}
+
+	for _, sDesc := range desc.Streams {
+		methods = append(methods, grpc.MethodInfo{
+			Name:           sDesc.StreamName,
+			IsClientStream: sDesc.ClientStreams,
+			IsServerStream: sDesc.ServerStreams,
+		})
+	}
+
+	s.serviceInfo[desc.ServiceName] = grpc.ServiceInfo{
+		Methods:  methods,
+		Metadata: desc.Metadata,
+	}
+}
+
+// GetServiceInfo implements the grpc.ServiceInfoProvider interface.
+func (s *Server) GetServiceInfo() map[string]grpc.ServiceInfo {
+	return s.serviceInfo
 }
 
 func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) pubsub.Handler {
@@ -121,14 +158,14 @@ func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) pubsub.Han
 				}
 			}()
 
-			return desc.Handler(impl, ctx, dec, nil)
+			return desc.Handler(impl, ctx, dec, s.unaryInt)
 		}()
 		if err != nil {
 			s.respondErr(msg, err)
 			return
 		}
 
-		payload, err := marshalRespMsg(resp.(proto.Message), transport.header, transport.trailer, true, false)
+		payload, err := marshalUnaryRespMsg(msg.Subject(), resp.(proto.Message), transport.header, transport.trailer, true, false)
 		if err != nil {
 			s.respondErr(msg, err)
 			return
@@ -183,6 +220,16 @@ func (s *Server) handleStream(desc grpc.StreamDesc, impl interface{}) pubsub.Han
 						err = fmt.Errorf("server.handleStream: panic recovered: %v", r)
 					}
 				}()
+
+				if s.streamInt != nil {
+					// pass the call through the stream interceptor
+					info := &grpc.StreamServerInfo{
+						FullMethod:     desc.StreamName,
+						IsClientStream: desc.ClientStreams,
+						IsServerStream: desc.ServerStreams,
+					}
+					return s.streamInt(impl, stream, info, desc.Handler)
+				}
 
 				return desc.Handler(impl, stream)
 			}(); r != nil {

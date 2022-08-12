@@ -16,7 +16,9 @@ import (
 	"github.com/tehsphinx/nrpc/testproto/testclient"
 	"github.com/tehsphinx/nrpc/testproto/testserver"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func TestUnary(t *testing.T) {
@@ -57,6 +59,27 @@ func TestUnary(t *testing.T) {
 		asrt.Equal(header.Get("srv-key"), []string{"srv-value"})
 
 		asrt.Equal(trailer.Get("traily"), []string{"t-value"})
+	})
+	t.Run("error case", func(t *testing.T) {
+		asrt := asrt.New(t)
+		ctx, cancel := context.WithTimeout(ctxMain, 2*time.Second)
+		defer cancel()
+
+		// outbound header
+		md := metadata.New(map[string]string{"heady": "head1"})
+		ctx = metadata.NewOutgoingContext(ctx, md)
+
+		// inbound header
+		var header, trailer metadata.MD
+		_, err := client.Unary(ctx, &testproto.UnaryReq{
+			Msg: "error",
+		}, grpc.Header(&header), grpc.Trailer(&trailer))
+
+		asrt.True(err != nil)
+		errStatus, ok := status.FromError(err)
+		asrt.True(ok)
+		asrt.Equal(errStatus.Code(), codes.InvalidArgument)
+		asrt.Equal(errStatus.Message(), "invalid message")
 	})
 }
 
@@ -110,6 +133,28 @@ func TestServerStream(t *testing.T) {
 
 		md = stream.Trailer()
 		asrt.Equal(md.Get("traily"), []string{"t-value"})
+	})
+	t.Run("stream error", func(t *testing.T) {
+		asrt := asrt.New(t)
+		ctx, cancel := context.WithTimeout(ctxMain, 2*time.Second)
+		defer cancel()
+
+		// outbound header
+		md := metadata.New(map[string]string{"heady": "head1"})
+		ctx = metadata.NewOutgoingContext(ctx, md)
+
+		stream, err := client.ServerStream(ctx, &testproto.ServerStreamReq{
+			Msg: "error",
+		})
+		asrt.NoErr(err)
+
+		_, r := stream.Recv()
+		asrt.True(r != nil)
+
+		errStatus, ok := status.FromError(r)
+		asrt.True(ok)
+		asrt.Equal(errStatus.Code(), codes.InvalidArgument)
+		asrt.Equal(errStatus.Message(), "invalid message")
 	})
 }
 
