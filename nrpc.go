@@ -40,8 +40,9 @@ func NewServer(pub pubsub.Publisher, sub pubsub.Subscriber, opts ...Option) *Ser
 		log:  opt.logger,
 		subs: newSubscriptions(opt.logger),
 
-		unaryInt:    opt.unaryInt,
-		streamInt:   opt.streamInt,
-		serviceInfo: map[string]grpc.ServiceInfo{},
+		unaryInt:     opt.unaryInt,
+		streamInt:    opt.streamInt,
+		statsHandler: opt.statsHandler,
+		serviceInfo:  map[string]grpc.ServiceInfo{},
 	}
 }

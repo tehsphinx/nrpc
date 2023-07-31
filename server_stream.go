@@ -9,25 +9,29 @@ import (
 	"github.com/tehsphinx/nrpc/pubsub"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
-func newServerStream(pub pubsub.Publisher, sub pubsub.Subscriber, log Logger, desc grpc.StreamDesc) *serverStream {
+func newServerStream(pub pubsub.Publisher, sub pubsub.Subscriber, statsHandler stats.Handler, log Logger, desc grpc.StreamDesc) *serverStream {
 	return &serverStream{
-		pub:    pub,
-		sub:    sub,
-		log:    log,
-		desc:   desc,
-		chRecv: make(chan *recvMsg, 1),
+		pub:          pub,
+		sub:          sub,
+		statsHandler: statsHandler,
+		log:          log,
+		desc:         desc,
+		chRecv:       make(chan *recvMsg, 1),
+		start:        time.Now(),
 	}
 }
 
 type serverStream struct {
-	pub  pubsub.Publisher
-	sub  pubsub.Subscriber
-	log  Logger
-	desc grpc.StreamDesc
+	pub          pubsub.Publisher
+	sub          pubsub.Subscriber
+	statsHandler stats.Handler
+	log          Logger
+	desc         grpc.StreamDesc
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -35,14 +39,15 @@ type serverStream struct {
 	chRecv      chan *recvMsg
 	sendHeader  metadata.MD
 	sendTrailer metadata.MD
+	start       time.Time
 }
 
 // SetHeader sets the header metadata. It may be called multiple times.
 // When call multiple times, all the provided metadata will be merged.
 // All the metadata will be sent out when one of the following happens:
-//  - ServerStream.SendHeader() is called;
-//  - The first response is sent out;
-//  - An RPC status is sent out (error or success).
+//   - ServerStream.SendHeader() is called;
+//   - The first response is sent out;
+//   - An RPC status is sent out (error or success).
 func (s *serverStream) SetHeader(md metadata.MD) error {
 	if s.sendHeader == nil {
 		s.sendHeader = md
@@ -106,6 +111,10 @@ func (s *serverStream) SendMsg(m interface{}) error {
 
 // Close closes the stream with OK status.
 func (s *serverStream) Close() {
+	defer func() {
+		s.statsHandler.HandleRPC(s.ctx, &stats.End{BeginTime: s.start, EndTime: time.Now()})
+	}()
+
 	if r := s.sendMsg(nil, true, false); r != nil {
 		s.log.Errorf("failed to close stream: %w", r)
 		return
@@ -114,8 +123,12 @@ func (s *serverStream) Close() {
 
 // CloseWithError closes the stream with the specified error.
 func (s *serverStream) CloseWithError(err error) {
-	stats := status.Convert(err)
-	if r := s.sendMsg(stats.Proto(), true, false); r != nil {
+	defer func() {
+		s.statsHandler.HandleRPC(s.ctx, &stats.End{BeginTime: s.start, EndTime: time.Now(), Error: err})
+	}()
+
+	state := status.Convert(err)
+	if r := s.sendMsg(state.Proto(), true, false); r != nil {
 		s.log.Errorf("failed to close stream with error: %w", r)
 		return
 	}
@@ -127,10 +140,14 @@ func (s *serverStream) sendMsg(args proto.Message, eos, headerOnly bool) (err er
 			s.cancel()
 		}
 	}()
-	payload, err := marshalRespMsg(args, s.sendHeader, s.sendTrailer, eos, headerOnly)
+	innerPayload, payload, err := marshalRespMsg(args, s.sendHeader, s.sendTrailer, eos, headerOnly)
 	if err != nil {
 		return err
 	}
+
+	s.statsHandler.HandleRPC(s.ctx, &stats.OutHeader{Header: s.sendHeader, FullMethod: s.desc.StreamName})
+	s.statsHandler.HandleRPC(s.ctx, &stats.OutPayload{Payload: args, Data: innerPayload, Length: len(innerPayload), WireLength: len(payload)})
+	s.statsHandler.HandleRPC(s.ctx, &stats.OutTrailer{Trailer: s.sendTrailer})
 
 	msg := pubsub.Message{
 		Subject: s.respSubj,
@@ -186,6 +203,12 @@ func (s *serverStream) recvMsg(target interface{}) (*Request, error) {
 	if r := proto.Unmarshal(req.Data, target.(proto.Message)); r != nil {
 		return nil, r
 	}
+
+	if len(req.Header) != 0 {
+		s.statsHandler.HandleRPC(s.ctx, &stats.InHeader{Header: toMD(req.Header), FullMethod: s.desc.StreamName})
+	}
+	s.statsHandler.HandleRPC(s.ctx, &stats.InPayload{Payload: target, Data: req.Data, Length: len(req.Data), WireLength: len(recv.data)})
+
 	return req, nil
 }
 
@@ -193,13 +216,19 @@ func (s *serverStream) recvMsg(target interface{}) (*Request, error) {
 func (s *serverStream) Subscribe(ctx context.Context, reqData []byte) error {
 	queue := "receive"
 
+	s.statsHandler.HandleRPC(ctx, &stats.Begin{BeginTime: s.start, IsClientStream: s.desc.ClientStreams, IsServerStream: s.desc.ServerStreams})
+
 	req, err := unmarshalReq(reqData)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal request message: %w", err)
 	}
 	s.respSubj = req.RespSubject
-	ctx = metadata.NewIncomingContext(ctx, toMD(req.Header))
+	reqHeader := toMD(req.Header)
+
+	ctx = metadata.NewIncomingContext(ctx, reqHeader)
 	s.ctx, s.cancel = context.WithCancel(ctx)
+
+	s.statsHandler.HandleRPC(ctx, &stats.InHeader{Header: reqHeader, WireLength: len(reqData), FullMethod: s.desc.StreamName})
 
 	s.log.Infof("Subscribed Stream (server): Subject => %s, Queue => %s", req.ReqSubject, queue)
 	sub, err := s.sub.Subscribe(req.ReqSubject, queue, func(ctx context.Context, msg pubsub.Replier) {

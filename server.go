@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
@@ -24,9 +25,10 @@ type Server struct {
 	subs     *subscriptions
 	shutdown context.CancelFunc
 
-	unaryInt    grpc.UnaryServerInterceptor
-	streamInt   grpc.StreamServerInterceptor
-	serviceInfo map[string]grpc.ServiceInfo
+	unaryInt     grpc.UnaryServerInterceptor
+	streamInt    grpc.StreamServerInterceptor
+	statsHandler stats.Handler
+	serviceInfo  map[string]grpc.ServiceInfo
 }
 
 var _ grpc.ServiceRegistrar = (*Server)(nil)
@@ -71,7 +73,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	return s.subs.watchSubscriptions(shutdownCtx)
 }
 
-// Stop signals the Service to shutdown. Stopping is done when the Listen function returns.
+// Stop signals the Service to shut down. Stopping is done when the Listen function returns.
 func (s *Server) Stop() {
 	s.shutdown()
 }
@@ -134,21 +136,38 @@ func (s *Server) GetServiceInfo() map[string]grpc.ServiceInfo {
 
 func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) pubsub.Handler {
 	return func(ctx context.Context, msg pubsub.Replier) {
-		req, err := unmarshalReq(msg.Data())
-		if err != nil {
-			s.respondErr(msg, err)
-			return
-		}
+		start := time.Now()
 
 		transport := newServerTransport(desc.MethodName)
 		ctx = grpc.NewContextWithServerTransportStream(ctx, transport)
-		ctx = metadata.NewIncomingContext(ctx, toMD(req.Header))
+		ctx = s.statsHandler.TagRPC(ctx, &stats.RPCTagInfo{
+			FullMethodName: desc.MethodName,
+		})
+
+		s.statsHandler.HandleRPC(ctx, &stats.Begin{BeginTime: start})
+
+		req, err := unmarshalReq(msg.Data())
+		if err != nil {
+			s.respondErr(msg, err)
+			s.statsEndRPC(ctx, start, err)
+			return
+		}
+		reqHeader := toMD(req.Header)
+
+		s.statsHandler.HandleRPC(ctx, &stats.InHeader{Header: reqHeader, FullMethod: desc.MethodName, WireLength: len(msg.Data())})
+		// s.statsHandler.HandleRPC(ctx, &stats.InTrailer{}) // no trailers
+
+		ctx = metadata.NewIncomingContext(ctx, reqHeader)
 		ctx, cancel := contextTimeout(ctx, req.Timeout)
 		defer cancel()
 
 		dec := func(target interface{}) error {
-			// nolint: forcetypeassert
-			return proto.Unmarshal(req.Data, target.(proto.Message))
+			//nolint:forcetypeassert
+			r := proto.Unmarshal(req.Data, target.(proto.Message))
+
+			s.statsHandler.HandleRPC(ctx, &stats.InPayload{Payload: target, Data: req.Data, Length: len(req.Data),
+				WireLength: len(msg.Data()), RecvTime: start})
+			return r
 		}
 
 		resp, err := func() (_ interface{}, err error) {
@@ -162,17 +181,31 @@ func (s *Server) handleMethod(desc grpc.MethodDesc, impl interface{}) pubsub.Han
 		}()
 		if err != nil {
 			s.respondErr(msg, err)
+			s.statsEndRPC(ctx, start, err)
 			return
 		}
 
-		payload, err := marshalUnaryRespMsg(msg.Subject(), resp.(proto.Message), transport.header, transport.trailer, true, false)
+		innerPayload, payload, err := marshalUnaryRespMsg(msg.Subject(), resp.(proto.Message), transport.header, transport.trailer, true, false)
 		if err != nil {
 			s.respondErr(msg, err)
+			s.statsEndRPC(ctx, start, err)
 			return
 		}
 
+		sent := time.Now()
 		s.reply(msg, payload)
+
+		s.statsHandler.HandleRPC(ctx, &stats.OutHeader{Header: transport.header, FullMethod: desc.MethodName})
+		s.statsHandler.HandleRPC(ctx, &stats.OutPayload{Payload: resp, Data: innerPayload, Length: len(innerPayload),
+			WireLength: len(payload), SentTime: sent})
+		s.statsHandler.HandleRPC(ctx, &stats.OutTrailer{Trailer: transport.trailer})
+
+		s.statsEndRPC(ctx, start, nil)
 	}
+}
+
+func (s *Server) statsEndRPC(ctx context.Context, start time.Time, err error) {
+	s.statsHandler.HandleRPC(ctx, &stats.End{BeginTime: start, EndTime: time.Now(), Error: err})
 }
 
 func (s *Server) respondErr(msg pubsub.Replier, resErr error) {
@@ -206,9 +239,9 @@ func (s *Server) reply(msg pubsub.Replier, payload []byte) {
 
 func (s *Server) handleStream(desc grpc.StreamDesc, impl interface{}) pubsub.Handler {
 	return func(ctx context.Context, msg pubsub.Replier) {
-		// dbg.Green("server.handleStream", msg.Subject(), msg.Data())
+		s.statsHandler.TagRPC(ctx, &stats.RPCTagInfo{FullMethodName: desc.StreamName})
 
-		stream := newServerStream(s.pub, s.sub, s.log, desc)
+		stream := newServerStream(s.pub, s.sub, s.statsHandler, s.log, desc)
 		if r := stream.Subscribe(ctx, msg.Data()); r != nil {
 			s.respondErr(msg, fmt.Errorf("failed to subscribe: %w", r))
 			return

@@ -1,13 +1,17 @@
 package nrpc
 
-import "google.golang.org/grpc"
+import (
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/stats"
+)
 
 // Option defines an option for configuring the server.
 type Option func(opt *options)
 
 func getOptions(opts []Option) options {
 	opt := options{
-		logger: noopLogger{},
+		logger:       noopLogger{},
+		statsHandler: noopStatsHandler{},
 	}
 
 	for _, o := range opts {
@@ -19,8 +23,9 @@ func getOptions(opts []Option) options {
 type options struct {
 	logger Logger
 
-	unaryInt  grpc.UnaryServerInterceptor
-	streamInt grpc.StreamServerInterceptor
+	unaryInt     grpc.UnaryServerInterceptor
+	streamInt    grpc.StreamServerInterceptor
+	statsHandler stats.Handler
 }
 
 // WithLogger sets the logger for the client or server.
@@ -50,5 +55,13 @@ func StreamInterceptor(i grpc.StreamServerInterceptor) Option {
 			panic("nrpc: The stream server interceptor was already set and may not be reset.")
 		}
 		opt.streamInt = i
+	}
+}
+
+// StatsHandler returns a ServerOption that sets the StatsHandler for the server.
+// It can be used to add tracing, metrics, etc.
+func StatsHandler(handler stats.Handler) Option {
+	return func(opt *options) {
+		opt.statsHandler = handler
 	}
 }

@@ -68,34 +68,36 @@ func marshalReqMsg(ctx context.Context, args proto.Message, reqSubj, respSubj st
 	})
 }
 
-func marshalRespMsg(resp proto.Message, header metadata.MD, trailer metadata.MD, eos bool, headerOnly bool) ([]byte, error) {
+func marshalRespMsg(resp proto.Message, header metadata.MD, trailer metadata.MD, eos bool, headerOnly bool) ([]byte, []byte, error) {
 	innerPayload, err := proto.Marshal(resp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return proto.Marshal(&Response{
+	payload, err := proto.Marshal(&Response{
 		Header:     fromMD(header),
 		Trailer:    fromMD(trailer),
 		HeaderOnly: headerOnly,
 		Data:       innerPayload,
 		Eos:        eos,
 	})
+	return innerPayload, payload, err
 }
 
-func marshalUnaryRespMsg(subj string, resp proto.Message, header metadata.MD, trailer metadata.MD, eos bool, headerOnly bool) ([]byte, error) {
+func marshalUnaryRespMsg(subj string, resp proto.Message, header metadata.MD, trailer metadata.MD, eos bool, headerOnly bool) ([]byte, []byte, error) {
 	innerPayload, err := proto.Marshal(resp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return marshalProto(subj, &Response{
+	payload, err := marshalProto(subj, &Response{
 		Header:     fromMD(header),
 		Trailer:    fromMD(trailer),
 		HeaderOnly: headerOnly,
 		Data:       innerPayload,
 		Eos:        eos,
 	}, MessageType_Data)
+	return innerPayload, payload, err
 }
 
 func marshalEOS() ([]byte, error) {
